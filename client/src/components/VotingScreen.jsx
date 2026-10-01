@@ -16,10 +16,7 @@ export const VotingScreen = () => {
   };
 
   const onSubmit = () => {
-    emit("castVote", {
-      fromUserID: selfUserID,
-      toUserID: selection.userID,
-    });
+    emit("castVote", selection.userID);
     setSelection(null);
     setSubmitted(true);
   };

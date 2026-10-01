@@ -1,46 +1,7 @@
-import { useContext, useState } from "react";
+import { useContext } from "react";
 import { MultiplayerCtx } from "./MultiplayerCtx";
-// import { useArrayNavigation } from "./useArrayNavigation";
-
-const SubmissionForm = () => {
-  const { emit, userID } = useContext(MultiplayerCtx);
-  const [submission, setSubmission] = useState("");
-  const [, setSubmitted] = useState(false);
-  const [submissionError, setSubmissionError] = useState("");
-
-  const onSubmit = (e) => {
-    e.preventDefault();
-    if (submission.length === 0) {
-      setSubmissionError("Must be a string");
-      return;
-    }
-    emit("submission", { userID, submission });
-    setSubmissionError("");
-    setSubmitted(true);
-  };
-  return (
-    <>
-      <form onSubmit={onSubmit}>
-        <input
-          type="text"
-          value={submission}
-          onChange={(e) => setSubmission(e.target.value)}
-        />
-
-        <button type="submit">Submit</button>
-      </form>
-      {submissionError && <p>{submissionError}</p>}
-    </>
-  );
-};
-
-const SubmissionResult = ({ submission }) => {
-  return (
-    <div>
-      <span>{submission}</span>
-    </div>
-  );
-};
+import { SubmissionForm } from "./SubmissionForm";
+import { SubmissionResult } from "./SubmissionResult";
 
 export const SubmissionScreen = () => {
   const { game, emit, userID } = useContext(MultiplayerCtx);
@@ -50,11 +11,7 @@ export const SubmissionScreen = () => {
   const submission = game.submissions[turnPlayer.userID];
 
   const onNext = () => {
-    if (turn === players.length) {
-      emit("setPhase", "voting");
-    } else {
-      emit("nextTurn", "submissions");
-    }
+    emit("advance");
   };
 
   return (

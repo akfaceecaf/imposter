@@ -1,5 +1,4 @@
-import { PROMPTS } from "../../client/src/constants.js";
-import { Player } from "./player.js";
+import PROMPTS from "../prompts.js";
 import { randomID, getRandomIdx } from "../random.js";
 
 const MIN_PLAYERS = 2;
@@ -20,14 +19,36 @@ export class Game {
     this.startedAt = null;
     this.endedAt = null;
     this.phase = "lobby";
-    this.prompt = PROMPTS[getRandomIdx(PROMPTS)];
+    this.prompt = null;
     this.submissions = {};
     this.results = { votes: {}, winner: null };
     this.turn = null;
   }
 
-  nextTurn(phase) {
-    this.checkPhase(phase);
+  advance() {
+    switch (this.phase) {
+      case "rolesReveal":
+        this.setPhase("submissions");
+        this.turn = 1;
+        return;
+      case "submissions":
+        if (!(this.players[this.turn - 1].userID in this.submissions)) {
+          throw new GameError("player has not made submission yet");
+        } else if (this.turn < this.players.length) {
+          this.nextTurn();
+        } else {
+          this.setPhase("voting");
+          this.turn = null;
+        }
+        return;
+      case "results":
+        throw new GameError("reached end of game");
+      default:
+        throw new GameError("invalid phase");
+    }
+  }
+
+  nextTurn() {
     if (!this.turn) {
       throw new GameError("there are no turns");
     } else {
@@ -37,11 +58,6 @@ export class Game {
 
   setPhase(phase) {
     this.phase = phase;
-    if (phase === "submissions") {
-      this.turn = 1;
-    } else {
-      this.turn = null;
-    }
   }
 
   checkPhase(phase) {
@@ -59,6 +75,9 @@ export class Game {
   }
 
   removePlayer(userID) {
+    if (!["lobby", "results"].includes(this.phase)) {
+      throw new GameError("can't remove player in game");
+    }
     const newPlayers = this.players.filter(
       (player) => player.userID !== userID,
     );
@@ -119,11 +138,13 @@ export class Game {
         player.role = "normal";
       }
     });
-    this.setPhase("rolesReveal");
+    this.prompt = PROMPTS[getRandomIdx(PROMPTS)];
     this.startedAt = Date.now();
+    this.setPhase("rolesReveal");
   }
 
   endGame() {
+    this.checkPhase("voting");
     const counts = Object.values(this.results.votes).reduce((acc, value) => {
       acc[value] = (acc[value] || 0) + 1;
       return acc;
@@ -135,18 +156,22 @@ export class Game {
     this.results.winner = votedOut.every(({ role }) => role === "imposter")
       ? "normal"
       : "imposter";
-    this.setPhase("results");
     this.endedAt = Date.now();
     this.turn = null;
+    this.setPhase("results");
   }
 
   resetGame() {
-    this.prompt = PROMPTS[getRandomIdx(PROMPTS)];
+    this.checkPhase("results");
+    this.prompt = null;
     this.submissions = {};
     this.results = { votes: {}, winner: null };
     this.turn = null;
     this.startedAt = null;
     this.endedAt = null;
+    for (player of this.players) {
+      player.role = null;
+    }
     this.setPhase("lobby");
   }
 }

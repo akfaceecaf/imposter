@@ -6,7 +6,7 @@ export const RoleScreen = () => {
   const { emit } = useContext(MultiplayerCtx);
 
   const onNext = () => {
-    emit("setPhase", "submissions");
+    emit("advance");
   };
 
   return (

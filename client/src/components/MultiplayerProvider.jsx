@@ -76,34 +76,15 @@ export const MultiplayerProvider = ({ children }) => {
 
     const unsubPlayerJoined = subscribe("player joined", (player) => {
       notify(`Player ${player.username} has joined`);
-      setGame((prev) => ({ ...prev, players: [...prev.players, player] }));
     });
 
     const unsubPlayerLeft = subscribe("player left", (player) => {
       notify(`Player ${player.username} left`);
-      setGame((prev) => ({
-        ...prev,
-        players: prev.players.filter((p) => p.userID !== player.userID),
-      }));
     });
 
-    const unsubPlayerOnline = subscribe("player online", (player) => {
-      setGame((prev) => ({
-        ...prev,
-        players: prev.players.map((p) =>
-          p.userID === player.userID ? player : p,
-        ),
-      }));
-    });
+    const unsubPlayerOnline = subscribe("player online", (player) => {});
 
-    const unsubPlayerOffline = subscribe("player offline", (player) => {
-      setGame((prev) => ({
-        ...prev,
-        players: prev.players.map((p) =>
-          p.userID === player.userID ? player : p,
-        ),
-      }));
-    });
+    const unsubPlayerOffline = subscribe("player offline", (player) => {});
 
     const unsubGameState = subscribe("gameState", (game) => {
       setGame(game);

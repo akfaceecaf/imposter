@@ -1,31 +1,6 @@
 import { useContext } from "react";
 import { MultiplayerCtx } from "./MultiplayerCtx";
-
-const PlayerRow = ({ player }) => {
-  const { userID: selfUserID } = useContext(MultiplayerCtx);
-  const { userID, username, connected } = player;
-  return (
-    <li>
-      {selfUserID === userID ? "* " : ""}
-      {username}
-      {!connected ? " (offline)" : ""}
-    </li>
-  );
-};
-const PlayersList = () => {
-  const { game } = useContext(MultiplayerCtx);
-  const { players } = game;
-  return (
-    <div>
-      <h2>Players</h2>
-      <ul>
-        {players.map((player) => {
-          return <PlayerRow key={player.userID} player={player} />;
-        })}
-      </ul>
-    </div>
-  );
-};
+import { PlayersList } from "./PlayersList";
 
 export const LobbyScreen = () => {
   const { game, emit, leaveGame } = useContext(MultiplayerCtx);

@@ -1,7 +1,7 @@
 class SessionStore {
   constructor() {}
-  findSession() {}
-  saveSession() {}
+  async findSession() {}
+  async saveSession() {}
 }
 
 export class InMemorySessionStore extends SessionStore {
@@ -10,11 +10,11 @@ export class InMemorySessionStore extends SessionStore {
     this.sessions = new Map();
   }
 
-  findSession(sessionID) {
-    return this.sessions.get(sessionID);
+  async findSession(sessionID) {
+    return await this.sessions.get(sessionID);
   }
 
-  saveSession(sessionID, session) {
-    this.sessions.set(sessionID, session);
+  async saveSession(sessionID, session) {
+    await this.sessions.set(sessionID, session);
   }
 }

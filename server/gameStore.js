@@ -3,16 +3,16 @@ export class InMemoryGameStore {
     this.games = new Map();
   }
 
-  saveGame(game) {
-    this.games.set(game.gameID, game);
+  async saveGame(game) {
+    await this.games.set(game.gameID, game);
   }
-  removeGame() {}
+  async removeGame() {}
 
-  findGame(gameID) {
-    return this.games.get(gameID);
+  async findGame(gameID) {
+    return await this.games.get(gameID);
   }
 
-  findAllGames() {
-    return [...this.games.values()];
+  async findAllGames() {
+    return await [...this.games.values()];
   }
 }

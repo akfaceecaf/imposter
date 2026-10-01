@@ -6,6 +6,7 @@ import { randomID } from "./random.js";
 import { Player } from "./classes/player.js";
 import { InMemoryGameStore } from "./gameStore.js";
 import { InMemorySessionStore } from "./sessionStore.js";
+import { toGameView, toPublicPlayer } from "./views.js";
 
 const PORT = process.env.PORT || 3000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
@@ -22,23 +23,26 @@ app.get("/", (req, res) => {
   res.json({ status: "success" });
 });
 
+// broadcast individual gameState to each user
+const broadcastGame = (game) => {
+  for (const player of game.players) {
+    const gameView = toGameView(game, player.userID);
+    io.to(player.userID).emit("gameState", gameView);
+  }
+};
+
 // middleware, check if from valid user and session
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const { sessionID } = socket.handshake.auth;
 
   // find existing session
   if (sessionID) {
-    const session = sessionStore.findSession(sessionID);
+    const session = await sessionStore.findSession(sessionID);
     if (session) {
       socket.sessionID = sessionID;
       socket.userID = session.userID;
-      const gameID = session.gameID;
-      if (gameID) {
-        socket.gameID = gameID;
-        socket.join(gameID);
-      } else {
-        socket.gameID = null;
-      }
+      socket.gameID = session.gameID ?? null;
+      socket.join(socket.userID);
       return next();
     }
   }
@@ -47,41 +51,67 @@ io.use((socket, next) => {
   socket.sessionID = randomID();
   socket.userID = randomID();
   socket.gameID = null;
+  socket.join(socket.userID);
   next();
 });
 
 io.on("connection", async (socket) => {
   console.log("connected");
 
-  // update current user session
-  sessionStore.saveSession(socket.sessionID, {
-    userID: socket.userID,
-    gameID: socket.gameID,
-    connected: true,
-  });
+  const assignSessionGame = async (gameID) => {
+    // leave previous game if exists
+    if (socket.gameID) {
+      socket.leave(socket.gameID);
+    }
+    if (gameID) {
+      socket.join(gameID);
+    }
+    socket.gameID = gameID;
+    // update user session
+    await sessionStore.saveSession(socket.sessionID, {
+      userID: socket.userID,
+      gameID: socket.gameID,
+      connected: true,
+    });
+  };
+
   // if was in a game, then mark connection status again
   const game = await gameStore.findGame(socket.gameID);
-  if (game) {
-    const { players } = game;
-    const player = players.find((p) => p.userID === socket.userID);
-    if (player) {
-      socket.join(game.gameID);
-      player.connected = true;
-      socket.to(socket.gameID).emit("player online", player);
-    }
+  const player = game?.players.find((p) => p.userID === socket.userID);
+  if (game && player) {
+    player.connected = true;
+    await gameStore.saveGame(game);
+    await assignSessionGame(game.gameID);
+    broadcastGame(game);
+    socket.to(socket.gameID).emit("player online", toPublicPlayer(player));
+  } else {
+    await assignSessionGame(null);
   }
   socket.emit("session", {
     userID: socket.userID,
     sessionID: socket.sessionID,
-    game,
+    game: player ? toGameView(game, socket.userID) : null,
   });
 
-  socket.on("createGame", (callback) => {
+  const withCallback = async (fn, callback) => {
     try {
+      const data = await fn();
+      return callback({
+        status: "success",
+        data,
+      });
+    } catch (error) {
+      return callback({ status: "error", message: error.message });
+    }
+  };
+
+  socket.on("createGame", (callback) => {
+    withCallback(async () => {
       // create a new unique game instance
+      const existingGames = await gameStore.findAllGames();
+
       let game = new Game();
       let attempts = 0;
-      const existingGames = gameStore.findAllGames();
       while (existingGames.some((g) => g.gameCode === game.gameCode)) {
         attempts++;
         if (attempts === MAX_CREATE_ATTEMPTS) {
@@ -96,24 +126,16 @@ io.on("connection", async (socket) => {
           connected: true,
         }),
       );
-      gameStore.saveGame(game);
-      socket.join(game.gameID);
 
-      sessionStore.saveSession(socket.sessionID, {
-        userID: socket.userID,
-        gameID: game.gameID,
-        connected: true,
-      });
-      socket.gameID = game.gameID;
-      return callback({ status: "success", data: game });
-    } catch (error) {
-      return callback({ status: "error", message: error.message });
-    }
+      await gameStore.saveGame(game);
+      await assignSessionGame(game.gameID);
+      return toGameView(game, socket.userID);
+    }, callback);
   });
 
   socket.on("joinGame", (gameCode, callback) => {
-    try {
-      const existingGames = gameStore.findAllGames();
+    withCallback(async () => {
+      const existingGames = await gameStore.findAllGames();
       const game = existingGames.find((g) => g.gameCode === gameCode);
       if (!game) {
         throw new Error("game does not exist");
@@ -127,48 +149,36 @@ io.on("connection", async (socket) => {
         connected: true,
       });
       game.addPlayer(player);
-      socket.join(gameID);
 
-      socket.gameID = gameID;
-      sessionStore.saveSession(socket.sessionID, {
-        userID: socket.userID,
-        gameID: gameID,
-        connected: true,
-      });
-      socket.to(gameID).emit("player joined", player);
-      return callback({ status: "success", data: game });
-    } catch (error) {
-      return callback({ status: "error", message: error.message });
-    }
+      await gameStore.saveGame(game);
+      await assignSessionGame(gameID);
+      broadcastGame(game);
+      socket.to(gameID).emit("player joined", toPublicPlayer(player));
+      return toGameView(game, socket.userID);
+    }, callback);
   });
 
   socket.on("leaveGame", (callback) => {
-    try {
+    withCallback(async () => {
       const gameID = socket.gameID;
-      const game = gameStore.findGame(gameID);
+      const game = await gameStore.findGame(gameID);
       if (!game) {
         throw new Error("game does not exist");
       }
       const player = game.players.find((p) => p.userID === socket.userID);
-
       game.removePlayer(socket.userID);
-      socket.leave(gameID);
-      socket.gameID = null;
-      sessionStore.saveSession(socket.sessionID, {
-        userID: socket.userID,
-        gameID: null,
-        connected: true,
-      });
-      socket.to(gameID).emit("player left", player);
-      return callback({ status: "success", data: null });
-    } catch (error) {
-      return callback({ status: "error", message: error.message });
-    }
+
+      await assignSessionGame(null);
+      await gameStore.saveGame(game);
+      broadcastGame(game);
+      socket.to(gameID).emit("player left", toPublicPlayer(player));
+      return null;
+    }, callback);
   });
 
-  const gameAction = (actionFn) => {
+  const gameAction = async (actionFn) => {
     try {
-      const game = gameStore.findGame(socket.gameID);
+      const game = await gameStore.findGame(socket.gameID);
       if (!game) {
         throw new Error("game not found");
       }
@@ -176,7 +186,8 @@ io.on("connection", async (socket) => {
         throw new Error("user not in game");
       }
       actionFn(game);
-      io.to(socket.gameID).emit("gameState", game);
+      await gameStore.saveGame(game);
+      broadcastGame(game);
     } catch (error) {
       socket.emit("gameError", { message: error.message });
     }
@@ -186,22 +197,18 @@ io.on("connection", async (socket) => {
     gameAction((g) => g.startGame());
   });
 
-  socket.on("setPhase", (phase) => {
-    gameAction((g) => g.setPhase(phase));
+  socket.on("advance", () => {
+    gameAction((g) => g.advance());
   });
 
-  socket.on("nextTurn", (phase) => {
-    gameAction((g) => g.nextTurn(phase));
-  });
-
-  socket.on("submission", (data) => {
+  socket.on("submission", (submission) => {
     gameAction((g) => {
-      g.makeSubmission(data.userID, data.submission);
+      g.makeSubmission(socket.userID, submission);
     });
   });
 
-  socket.on("castVote", (data) => {
-    gameAction((g) => g.castVote(data.fromUserID, data.toUserID));
+  socket.on("castVote", (toUserID) => {
+    gameAction((g) => g.castVote(socket.userID, toUserID));
   });
 
   socket.on("resetGame", () => {
@@ -210,19 +217,21 @@ io.on("connection", async (socket) => {
     });
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log("disconnected");
     // if user is a player set status to offline and notify other users
-    const game = gameStore.findGame(socket.gameID);
+    const game = await gameStore.findGame(socket.gameID);
     if (game) {
       const { players } = game;
       const player = players.find((p) => p.userID === socket.userID);
       if (player) {
         player.connected = false;
-        socket.to(socket.gameID).emit("player offline", player);
+        await gameStore.saveGame(game);
+        broadcastGame(game);
+        socket.to(socket.gameID).emit("player offline", toPublicPlayer(player));
       }
     }
-    sessionStore.saveSession(socket.sessionID, {
+    await sessionStore.saveSession(socket.sessionID, {
       userID: socket.userID,
       gameID: socket.gameID,
       connected: false,
