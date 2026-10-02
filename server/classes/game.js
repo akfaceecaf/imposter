@@ -1,5 +1,5 @@
-import PROMPTS from "../prompts.js";
-import { randomID, getRandomIdx } from "../random.js";
+import PROMPTS from "../constants/prompts.js";
+import { randomID, getRandomIdx } from "../utils/random.js";
 
 const MIN_PLAYERS = 2;
 
@@ -169,9 +169,26 @@ export class Game {
     this.turn = null;
     this.startedAt = null;
     this.endedAt = null;
-    for (player of this.players) {
+    for (const player of this.players) {
       player.role = null;
     }
     this.setPhase("lobby");
+  }
+
+  static fromJSON(json) {
+    const game = new Game();
+    game.phase = json.phase;
+    game.gameID = json.game_id;
+    game.gameCode = json.game_code;
+    game.players = json.players;
+    game.createdAt = json.createdat;
+    game.startedAt = json.startedat;
+    game.endedAt = json.endedat;
+    game.phase = json.phase;
+    game.prompt = json.prompt;
+    game.submissions = json.submissions;
+    game.results = json.results;
+    game.turn = json.turn;
+    return game;
   }
 }

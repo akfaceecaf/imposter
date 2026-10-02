@@ -2,18 +2,21 @@ import { Server } from "socket.io";
 import express from "express";
 import { createServer } from "node:http";
 import { Game } from "./classes/game.js";
-import { randomID } from "./random.js";
+import { randomID } from "./utils/random.js";
 import { Player } from "./classes/player.js";
-import { InMemoryGameStore } from "./gameStore.js";
-import { InMemorySessionStore } from "./sessionStore.js";
-import { toGameView, toPublicPlayer } from "./views.js";
+import { DBGameStore, InMemoryGameStore } from "./classes/gameStore.js";
+import {
+  DBSessionStore,
+  InMemorySessionStore,
+} from "./classes/sessionStore.js";
+import { toGameView, toPublicPlayer } from "./classes/utils/views.js";
 
 const PORT = process.env.PORT || 3000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 const MAX_CREATE_ATTEMPTS = 100;
 
-const gameStore = new InMemoryGameStore();
-const sessionStore = new InMemorySessionStore();
+const gameStore = new DBGameStore();
+const sessionStore = new DBSessionStore();
 
 const app = express();
 const server = createServer(app);
@@ -75,24 +78,6 @@ io.on("connection", async (socket) => {
     });
   };
 
-  // if was in a game, then mark connection status again
-  const game = await gameStore.findGame(socket.gameID);
-  const player = game?.players.find((p) => p.userID === socket.userID);
-  if (game && player) {
-    player.connected = true;
-    await gameStore.saveGame(game);
-    await assignSessionGame(game.gameID);
-    broadcastGame(game);
-    socket.to(socket.gameID).emit("player online", toPublicPlayer(player));
-  } else {
-    await assignSessionGame(null);
-  }
-  socket.emit("session", {
-    userID: socket.userID,
-    sessionID: socket.sessionID,
-    game: player ? toGameView(game, socket.userID) : null,
-  });
-
   const withCallback = async (fn, callback) => {
     try {
       const data = await fn();
@@ -108,11 +93,9 @@ io.on("connection", async (socket) => {
   socket.on("createGame", (callback) => {
     withCallback(async () => {
       // create a new unique game instance
-      const existingGames = await gameStore.findAllGames();
-
       let game = new Game();
       let attempts = 0;
-      while (existingGames.some((g) => g.gameCode === game.gameCode)) {
+      while (await gameStore.findGameByCode(game.gameCode)) {
         attempts++;
         if (attempts === MAX_CREATE_ATTEMPTS) {
           throw new Error("could not create game");
@@ -135,8 +118,7 @@ io.on("connection", async (socket) => {
 
   socket.on("joinGame", (gameCode, callback) => {
     withCallback(async () => {
-      const existingGames = await gameStore.findAllGames();
-      const game = existingGames.find((g) => g.gameCode === gameCode);
+      const game = await gameStore.findGameByCode(gameCode);
       if (!game) {
         throw new Error("game does not exist");
       }
@@ -161,7 +143,7 @@ io.on("connection", async (socket) => {
   socket.on("leaveGame", (callback) => {
     withCallback(async () => {
       const gameID = socket.gameID;
-      const game = await gameStore.findGame(gameID);
+      const game = await gameStore.findGameByID(gameID);
       if (!game) {
         throw new Error("game does not exist");
       }
@@ -178,7 +160,7 @@ io.on("connection", async (socket) => {
 
   const gameAction = async (actionFn) => {
     try {
-      const game = await gameStore.findGame(socket.gameID);
+      const game = await gameStore.findGameByID(socket.gameID);
       if (!game) {
         throw new Error("game not found");
       }
@@ -217,10 +199,28 @@ io.on("connection", async (socket) => {
     });
   });
 
+  // if was in a game, then mark connection status again
+  const game = await gameStore.findGameByID(socket.gameID);
+  const player = game?.players.find((p) => p.userID === socket.userID);
+  if (game && player) {
+    player.connected = true;
+    await gameStore.saveGame(game);
+    await assignSessionGame(game.gameID);
+    broadcastGame(game);
+    socket.to(socket.gameID).emit("player online", toPublicPlayer(player));
+  } else {
+    await assignSessionGame(null);
+  }
+  socket.emit("session", {
+    userID: socket.userID,
+    sessionID: socket.sessionID,
+    game: player ? toGameView(game, socket.userID) : null,
+  });
+
   socket.on("disconnect", async () => {
     console.log("disconnected");
     // if user is a player set status to offline and notify other users
-    const game = await gameStore.findGame(socket.gameID);
+    const game = await gameStore.findGameByID(socket.gameID);
     if (game) {
       const { players } = game;
       const player = players.find((p) => p.userID === socket.userID);
